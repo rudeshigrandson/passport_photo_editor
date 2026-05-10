@@ -1,0 +1,20 @@
+* { box-sizing: border-box; }
+body { font-family: -apple-system, system-ui, sans-serif; margin: 0; background: #f5f5f7; color: #1d1d1f; }
+header { background: #fff; padding: 1rem 2rem; border-bottom: 1px solid #e5e5e7; display: flex; align-items: center; gap: 1rem; }
+header h1 { margin: 0; font-size: 1.25rem; }
+.tag { font-size: 0.75rem; padding: 0.2rem 0.5rem; border-radius: 10px; background: #e8f5e9; color: #2e7d32; }
+main { max-width: 800px; margin: 1rem auto; padding: 0 1rem; }
+.step { background: #fff; padding: 1.25rem; border-radius: 12px; margin-bottom: 1rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+.step h2 { margin-top: 0; font-size: 1.05rem; }
+button { background: #0071e3; color: #fff; border: 0; padding: 0.55rem 1rem; border-radius: 8px; cursor: pointer; font-size: 0.95rem; }
+button:hover { background: #005bb5; }
+button:disabled { background: #999; cursor: wait; }
+input[type=file], input[type=number], select { padding: 0.4rem; border: 1px solid #d2d2d7; border-radius: 6px; font-size: 0.95rem; }
+label { display: inline-flex; align-items: center; gap: 0.4rem; margin-right: 1rem; margin-bottom: 0.5rem; }
+canvas { max-width: 100%; height: auto; display: block; margin-top: 0.75rem; border: 1px solid #e5e5e7; border-radius: 6px; background: repeating-conic-gradient(#eee 0% 25%, #fff 0% 50%) 50% / 16px 16px; }
+.status { margin-top: 0.5rem; font-size: 0.9rem; }
+.status.ok { color: #2e7d32; }
+.status.err { color: #c62828; }
+.hint { color: #666; font-size: 0.85rem; }
+.presets { margin: 0.5rem 0; display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.presets button { padding: 0.35rem 0.7rem; border: 1px solid #d2d2d7; color: #1d1d1f; }

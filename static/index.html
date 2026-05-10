@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Passport Photo Editor</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<header><h1>Passport Photo Editor</h1><span class="tag">offline · local</span></header>
+
+<main>
+  <section class="step" id="step-upload">
+    <h2>1. Upload photo</h2>
+    <input type="file" id="file" accept="image/*" />
+    <p class="hint">JPEG/PNG. Face should be visible and centered.</p>
+  </section>
+
+  <section class="step" id="step-detect" hidden>
+    <h2>2. Face check</h2>
+    <div id="detect-status" class="status"></div>
+    <canvas id="orig-canvas"></canvas>
+  </section>
+
+  <section class="step" id="step-bg" hidden>
+    <h2>3. Background</h2>
+    <button id="btn-remove">Remove background</button>
+    <div id="bg-controls" hidden>
+      <label>Color
+        <input type="color" id="bg-color" value="#ffffff" />
+      </label>
+      <div class="presets">
+        <button data-c="#ffffff" style="background:#fff">White</button>
+        <button data-c="#dbe8ff" style="background:#dbe8ff">Light blue</button>
+        <button data-c="#cccccc" style="background:#ccc">Gray</button>
+        <button data-c="#ff0000" style="background:#ff0000;color:#fff">Red</button>
+      </div>
+      <canvas id="final-canvas"></canvas>
+    </div>
+  </section>
+
+  <section class="step" id="step-sheet" hidden>
+    <h2>4. Print sheet</h2>
+    <label>Paper
+      <select id="paper"></select>
+    </label>
+    <label>Photo size
+      <select id="photo-size"></select>
+    </label>
+    <label>DPI
+      <input type="number" id="dpi" value="300" min="150" max="600" />
+    </label>
+    <label>Margin (mm)
+      <input type="number" id="margin" value="5" min="0" max="20" />
+    </label>
+    <label>Gap (mm)
+      <input type="number" id="gap" value="3" min="0" max="20" />
+    </label>
+    <label><input type="checkbox" id="cut" checked /> cut lines</label>
+    <button id="btn-sheet">Generate &amp; download PDF</button>
+    <div id="sheet-status" class="status"></div>
+  </section>
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>
