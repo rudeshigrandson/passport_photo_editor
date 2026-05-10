@@ -113,8 +113,10 @@ PHOTO_SIZES_MM = {
 
 @app.route('/api/paper-options')
 def paper_options():
-    return jsonify({'paper': list(PAPER_SIZES_MM.keys()),
-                    'photo': list(PHOTO_SIZES_MM.keys())})
+    return jsonify({
+        'paper': {k: {'w': v[0], 'h': v[1]} for k, v in PAPER_SIZES_MM.items()},
+        'photo': {k: {'w': v[0], 'h': v[1]} for k, v in PHOTO_SIZES_MM.items()},
+    })
 
 
 @app.route('/api/generate-sheet', methods=['POST'])
