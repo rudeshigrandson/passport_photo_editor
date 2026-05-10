@@ -58,23 +58,46 @@ async function init() {
     $(id).addEventListener('input', () => { redistributeCounts(); renderSheetPreview(); }));
   $('cut').addEventListener('change', renderSheetPreview);
 
+  // Format auto-default based on paper. Stops auto-defaulting once user picks
+  // an option themselves.
+  $('paper').addEventListener('change', () => {
+    if (!$('format').dataset.touched) autoFormat();
+    updateBtnLabel();
+  });
+  $('format').addEventListener('change', () => {
+    $('format').dataset.touched = '1';
+    updateBtnLabel();
+  });
+  autoFormat();
+  updateBtnLabel();
+
   setupDropzone();
   $('btn-add-more').addEventListener('click', () => $('file').click());
   $('btn-sheet').addEventListener('click', generateSheet);
   $('btn-refresh').addEventListener('click', startFresh);
 }
 
+const PDF_FRIENDLY_PAPERS = new Set(['A4', 'A3', 'Letter']);
+function autoFormat() {
+  const paper = $('paper').value;
+  $('format').value = PDF_FRIENDLY_PAPERS.has(paper) ? 'pdf' : 'image';
+}
+function updateBtnLabel() {
+  const fmt = $('format').value;
+  const totalCopies = photos.reduce((s, p) => s + p.count, 0);
+  const cap = capacity();
+  const pages = totalCopies ? Math.ceil(totalCopies / cap) : 1;
+  let label;
+  if (fmt === 'pdf') {
+    label = pages > 1 ? `Generate & download PDF (${pages} pages)` : 'Generate & download PDF';
+  } else {
+    label = pages > 1 ? `Generate & download ZIP (${pages} images)` : 'Generate & download PNG';
+  }
+  $('btn-sheet').querySelector('.btn-label').textContent = label;
+}
+
 function startFresh() {
-  if (photos.length && !confirm('Clear all photos and start a new session?')) return;
-  photos.length = 0;
-  $('photo-list').innerHTML = '';
-  $('photos-count').textContent = '0';
-  $('step-photos').hidden = true;
-  $('step-sheet').hidden = true;
-  $('file').value = '';
-  setStatus('sheet-status', '');
-  $('layout-info').innerHTML = '';
-  $('sheet-preview').innerHTML = '';
+  location.reload();
 }
 init();
 
@@ -238,12 +261,19 @@ function removePhoto(id) {
 async function removeBg(photo) {
   const card = photo.el;
   showCardBusy(card, true, 'Removing background…');
-  const fd = new FormData();
-  fd.append('image', photo.origBlob);
-  const r = await fetch('/api/remove-bg', { method: 'POST', body: fd });
-  photo.cutoutBlob = await r.blob();
-  photo.bgRemoved = true;
-  showCardBusy(card, false);
+  try {
+    const fd = new FormData();
+    fd.append('image', photo.origBlob);
+    const r = await fetch('/api/remove-bg', { method: 'POST', body: fd });
+    if (!r.ok) throw new Error('remove-bg failed');
+    photo.cutoutBlob = await r.blob();
+    photo.bgRemoved = true;
+  } catch (err) {
+    console.error(err);
+    card.querySelector('.bg-toggle').checked = false;
+  } finally {
+    showCardBusy(card, false);
+  }
 }
 
 async function applyColor(photo, hex) {
@@ -347,10 +377,13 @@ function renderSheetPreview() {
   $('layout-info').innerHTML =
     `<b>${totalCopies}</b> total copies · grid <b>${cols}×${rows}</b> = ${cap}/page · ` +
     `paper ${pw.toFixed(0)}×${ph.toFixed(0)} mm · photo ${fw}×${fh} mm${pageNote}`;
+
+  updateBtnLabel();
 }
 
 /* ============== GENERATE ============== */
 async function generateSheet(e) {
+  const btn = e.currentTarget;
   if (!photos.length) {
     setStatus('sheet-status', 'Add at least one photo.', 'err'); return;
   }
@@ -358,32 +391,48 @@ async function generateSheet(e) {
   if (totalCount === 0) {
     setStatus('sheet-status', 'Set copies > 0 on at least one photo.', 'err'); return;
   }
-  busy(e.currentTarget, true);
-  setStatus('sheet-status', 'Generating PDF…');
+  busy(btn, true);
+  setStatus('sheet-status', 'Generating…');
 
-  const fd = new FormData();
-  for (const p of photos) fd.append('images', p.finalBlob, `${p.id}.png`);
-  fd.append('counts', JSON.stringify(photos.map(p => p.count)));
-  fd.append('paper', $('paper').value);
-  fd.append('photo_size', $('photo-size').value);
-  fd.append('dpi', $('dpi').value);
-  fd.append('margin', $('margin').value);
-  fd.append('gap', $('gap').value);
-  fd.append('cut_lines', $('cut').checked ? '1' : '0');
-  fd.append('smart_crop', $('smart').checked ? '1' : '0');
+  try {
+    const fd = new FormData();
+    for (const p of photos) fd.append('images', p.finalBlob, `${p.id}.png`);
+    fd.append('counts', JSON.stringify(photos.map(p => p.count)));
+    fd.append('paper', $('paper').value);
+    fd.append('photo_size', $('photo-size').value);
+    fd.append('dpi', $('dpi').value);
+    fd.append('margin', $('margin').value);
+    fd.append('gap', $('gap').value);
+    fd.append('cut_lines', $('cut').checked ? '1' : '0');
+    fd.append('smart_crop', $('smart').checked ? '1' : '0');
+    fd.append('format', $('format').value);
 
-  const r = await fetch('/api/generate-sheet', { method: 'POST', body: fd });
-  if (!r.ok) {
-    setStatus('sheet-status', 'Failed to generate.', 'err');
-    busy(e.currentTarget, false); return;
+    const r = await fetch('/api/generate-sheet', { method: 'POST', body: fd });
+    if (!r.ok) {
+      setStatus('sheet-status', 'Failed to generate.', 'err');
+      return;
+    }
+    const blob = await r.blob();
+    // Pick filename + extension from server's content-disposition if possible,
+    // otherwise derive from mimetype.
+    let filename = 'passport_sheet';
+    const cd = r.headers.get('content-disposition') || '';
+    const m = /filename="?([^";]+)"?/.exec(cd);
+    if (m) filename = m[1];
+    else if (blob.type === 'application/pdf') filename += '.pdf';
+    else if (blob.type === 'application/zip') filename += '.zip';
+    else if (blob.type === 'image/png') filename += '.png';
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
+    setStatus('sheet-status', `✓ Downloaded (${filename}).`, 'ok');
+  } catch (err) {
+    console.error(err);
+    setStatus('sheet-status', 'Failed: ' + (err.message || err), 'err');
+  } finally {
+    busy(btn, false);
   }
-  const blob = await r.blob();
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = 'passport_sheet.pdf'; a.click();
-  URL.revokeObjectURL(url);
-  setStatus('sheet-status', '✓ Downloaded.', 'ok');
-  busy(e.currentTarget, false);
 }
 
 /* ============== HELPERS ============== */

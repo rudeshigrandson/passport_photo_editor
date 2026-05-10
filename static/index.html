@@ -79,10 +79,18 @@
         <label class="check"><input type="checkbox" id="cut" checked /> show cut lines</label>
         <label class="check"><input type="checkbox" id="smart" checked /> smart face-anchored crop (recommended)</label>
 
+        <div class="field">
+          <label for="format">Output format</label>
+          <select id="format">
+            <option value="pdf">PDF (best for A4 / A3 / Letter)</option>
+            <option value="image">Image — PNG (best for 4×6, 5×7, 4×5 photo paper)</option>
+          </select>
+        </div>
+
         <div id="layout-info" class="layout-info"></div>
 
         <button class="btn primary big" id="btn-sheet">
-          <span class="btn-label">Generate &amp; download PDF</span>
+          <span class="btn-label">Generate &amp; download</span>
           <span class="spinner" hidden></span>
         </button>
         <div id="sheet-status" class="status"></div>

@@ -2,6 +2,7 @@ import io
 import json
 import math
 import os
+import zipfile
 from flask import Flask, request, jsonify, send_from_directory, send_file
 from PIL import Image, ImageDraw, ImageOps
 import numpy as np
@@ -287,6 +288,30 @@ def generate_sheet():
                 break
         pages.append(sheet)
 
+    fmt = request.form.get('format', 'pdf').lower()
+
+    if fmt == 'image':
+        if len(pages) == 1:
+            buf = io.BytesIO()
+            pages[0].save(buf, 'PNG', optimize=True)
+            buf.seek(0)
+            return send_file(buf, mimetype='image/png',
+                             as_attachment=True,
+                             download_name=f'passport_sheet_{paper}_{photo_key}.png')
+        # multi-page → ZIP of PNGs
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+            for i, page in enumerate(pages, 1):
+                page_buf = io.BytesIO()
+                page.save(page_buf, 'PNG', optimize=True)
+                zf.writestr(f'sheet_{paper}_{photo_key}_page{i}.png',
+                            page_buf.getvalue())
+        buf.seek(0)
+        return send_file(buf, mimetype='application/zip',
+                         as_attachment=True,
+                         download_name=f'passport_sheets_{paper}_{photo_key}.zip')
+
+    # default: PDF
     buf = io.BytesIO()
     pages[0].save(buf, 'PDF', resolution=dpi,
                   save_all=True, append_images=pages[1:])
