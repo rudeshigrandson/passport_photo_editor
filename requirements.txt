@@ -4,3 +4,4 @@ numpy>=1.26,<2.0
 rembg>=2.0.50
 onnxruntime>=1.17
 opencv-python-headless>=4.8
+pillow-heif>=0.16

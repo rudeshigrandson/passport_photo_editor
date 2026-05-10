@@ -15,57 +15,42 @@
       <h1>Passport Photo Editor</h1>
       <span class="tag">100% offline · runs on your computer</span>
     </div>
+    <button class="btn ghost-light" id="btn-refresh" title="Clear all and start a new session">↻ Start fresh</button>
   </div>
 </header>
 
 <main>
   <!-- 1. UPLOAD -->
   <section class="card" id="step-upload">
-    <div class="step-head"><span class="step-num">1</span><h2>Upload your photo</h2></div>
+    <div class="step-head"><span class="step-num">1</span><h2>Upload photos</h2></div>
     <div id="dropzone" class="dropzone">
       <div class="dropzone-inner">
         <div class="dz-icon">⬆</div>
-        <div class="dz-title">Drag &amp; drop a photo here</div>
-        <div class="dz-sub">or click to browse · JPEG / PNG / HEIC</div>
-        <input type="file" id="file" accept="image/*" hidden />
+        <div class="dz-title">Drag &amp; drop one or more photos</div>
+        <div class="dz-sub">or click to browse · JPEG / PNG / HEIC (iPhone) · multiple OK</div>
+        <input type="file" id="file" accept="image/*,.heic,.heif" multiple hidden />
       </div>
     </div>
   </section>
 
-  <!-- 2. FACE CHECK -->
-  <section class="card" id="step-detect" hidden>
-    <div class="step-head"><span class="step-num">2</span><h2>Face check</h2></div>
-    <div id="detect-status" class="status"></div>
-    <div class="canvas-wrap"><canvas id="orig-canvas"></canvas></div>
-  </section>
-
-  <!-- 3. BACKGROUND -->
-  <section class="card" id="step-bg" hidden>
-    <div class="step-head"><span class="step-num">3</span><h2>Background</h2></div>
-    <button class="btn primary" id="btn-remove">
-      <span class="btn-label">Remove background</span>
-      <span class="spinner" hidden></span>
-    </button>
-
-    <div id="bg-controls" hidden>
-      <p class="section-label">Choose a background color</p>
-      <div class="palette" id="palette"></div>
-      <div class="custom-color">
-        <label>
-          Custom
-          <input type="color" id="bg-color" value="#ffffff" />
-        </label>
-        <span id="hex-display" class="hex">#ffffff</span>
-      </div>
-
-      <p class="section-label">Preview</p>
-      <div class="canvas-wrap"><canvas id="final-canvas"></canvas></div>
+  <!-- 2. PHOTOS -->
+  <section class="card" id="step-photos" hidden>
+    <div class="step-head">
+      <span class="step-num">2</span>
+      <h2>Your photos</h2>
+      <span class="muted-pill" id="photos-count">0</span>
+      <button class="btn ghost mini" id="btn-add-more">+ add more</button>
     </div>
+    <p class="hint">
+      Each photo is checked for a face. Background removal is optional. The
+      <b>copies</b> field controls how many of each photo go on the sheet.
+    </p>
+    <div id="photo-list" class="photo-list"></div>
   </section>
 
-  <!-- 4. SHEET -->
+  <!-- 3. SHEET -->
   <section class="card" id="step-sheet" hidden>
-    <div class="step-head"><span class="step-num">4</span><h2>Print sheet</h2></div>
+    <div class="step-head"><span class="step-num">3</span><h2>Print sheet</h2></div>
 
     <div class="grid-2">
       <div class="controls">
@@ -92,6 +77,7 @@
           </div>
         </div>
         <label class="check"><input type="checkbox" id="cut" checked /> show cut lines</label>
+        <label class="check"><input type="checkbox" id="smart" checked /> smart face-anchored crop (recommended)</label>
 
         <div id="layout-info" class="layout-info"></div>
 
@@ -109,6 +95,34 @@
     </div>
   </section>
 </main>
+
+<!-- Photo card template -->
+<template id="tpl-photo-card">
+  <div class="photo-card">
+    <button class="remove-photo" title="Remove">×</button>
+    <div class="thumb-wrap">
+      <canvas class="thumb"></canvas>
+      <div class="face-badge"></div>
+    </div>
+    <div class="photo-controls">
+      <label class="check">
+        <input type="checkbox" class="bg-toggle" />
+        Remove background
+      </label>
+      <div class="bg-section" hidden>
+        <div class="mini-palette"></div>
+        <div class="custom-color">
+          <input type="color" class="bg-color" value="#ffffff" />
+          <span class="hex">#ffffff</span>
+        </div>
+      </div>
+      <label class="copies">
+        <span>Copies on sheet</span>
+        <input type="number" class="count" value="10" min="0" max="100" />
+      </label>
+    </div>
+  </div>
+</template>
 
 <script src="app.js"></script>
 </body>
