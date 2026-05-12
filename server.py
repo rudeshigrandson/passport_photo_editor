@@ -222,6 +222,16 @@ def generate_sheet():
     if len(counts) < len(files):
         counts += [1] * (len(files) - len(counts))
 
+    # Optional per-photo manual crop rect, normalized to source (0..1).
+    # Shape: [{"x":..,"y":..,"w":..,"h":..} | null, ...] parallel to images.
+    crops_raw = request.form.get('crops', '')
+    try:
+        crops = json.loads(crops_raw) if crops_raw else [None] * len(files)
+    except Exception:
+        crops = [None] * len(files)
+    if len(crops) < len(files):
+        crops += [None] * (len(files) - len(crops))
+
     paper = request.form.get('paper', 'A4')
     photo_key = request.form.get('photo_size', 'passport_intl_35x45')
     dpi = int(request.form.get('dpi', '300'))
@@ -248,13 +258,27 @@ def generate_sheet():
     rows = max(1, (ph - 2*margin + gap) // (fh + gap))
     capacity = cols * rows
 
-    # process each unique upload once: face-anchored crop + resize
+    # process each unique upload once: manual crop → smart crop → naive resize
     queue = []
-    for f, n in zip(files, counts):
+    for f, n, crop_spec in zip(files, counts, crops):
         if n <= 0:
             continue
         src = open_normalized(f.stream)
-        photo = smart_crop(src, fw, fh) if smart else src.resize((fw, fh), Image.LANCZOS)
+        sw, sh = src.size
+        if crop_spec and all(k in crop_spec for k in ('x', 'y', 'w', 'h')):
+            cx = max(0.0, min(1.0, float(crop_spec['x'])))
+            cy = max(0.0, min(1.0, float(crop_spec['y'])))
+            cw = max(0.001, min(1.0 - cx, float(crop_spec['w'])))
+            ch = max(0.001, min(1.0 - cy, float(crop_spec['h'])))
+            x1 = int(cx * sw)
+            y1 = int(cy * sh)
+            x2 = int((cx + cw) * sw)
+            y2 = int((cy + ch) * sh)
+            photo = src.crop((x1, y1, x2, y2)).resize((fw, fh), Image.LANCZOS)
+        elif smart:
+            photo = smart_crop(src, fw, fh)
+        else:
+            photo = src.resize((fw, fh), Image.LANCZOS)
         queue.extend([photo] * n)
 
     if not queue:
@@ -289,27 +313,35 @@ def generate_sheet():
         pages.append(sheet)
 
     fmt = request.form.get('format', 'pdf').lower()
+    base = f'passport_sheet_{paper}_{photo_key}'
 
-    if fmt == 'image':
+    if fmt in ('png', 'image', 'jpg', 'jpeg'):
+        is_jpg = fmt in ('jpg', 'jpeg')
+        ext = 'jpg' if is_jpg else 'png'
+        save_kwargs = (dict(format='JPEG', quality=92)
+                       if is_jpg else dict(format='PNG', optimize=True))
+
+        def render(img):
+            b = io.BytesIO()
+            img_to_save = img.convert('RGB') if is_jpg else img
+            img_to_save.save(b, **save_kwargs)
+            return b.getvalue()
+
         if len(pages) == 1:
-            buf = io.BytesIO()
-            pages[0].save(buf, 'PNG', optimize=True)
-            buf.seek(0)
-            return send_file(buf, mimetype='image/png',
+            buf = io.BytesIO(render(pages[0]))
+            return send_file(buf, mimetype=f'image/{"jpeg" if is_jpg else "png"}',
                              as_attachment=True,
-                             download_name=f'passport_sheet_{paper}_{photo_key}.png')
-        # multi-page → ZIP of PNGs
+                             download_name=f'{base}.{ext}')
+
+        # multi-page → ZIP
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
             for i, page in enumerate(pages, 1):
-                page_buf = io.BytesIO()
-                page.save(page_buf, 'PNG', optimize=True)
-                zf.writestr(f'sheet_{paper}_{photo_key}_page{i}.png',
-                            page_buf.getvalue())
+                zf.writestr(f'{base}_page{i}.{ext}', render(page))
         buf.seek(0)
         return send_file(buf, mimetype='application/zip',
                          as_attachment=True,
-                         download_name=f'passport_sheets_{paper}_{photo_key}.zip')
+                         download_name=f'{base}.zip')
 
     # default: PDF
     buf = io.BytesIO()
@@ -318,7 +350,7 @@ def generate_sheet():
     buf.seek(0)
     return send_file(buf, mimetype='application/pdf',
                      as_attachment=True,
-                     download_name=f'passport_sheet_{paper}_{photo_key}.pdf')
+                     download_name=f'{base}.pdf')
 
 
 if __name__ == '__main__':

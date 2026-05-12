@@ -54,46 +54,31 @@ async function init() {
   for (const k of Object.keys(PHOTO)) photoSel.add(new Option(PHOTO_LABELS[k] || k, k));
   photoSel.value = 'passport_intl_35x45';
 
-  ['paper', 'photo-size', 'margin', 'gap'].forEach(id =>
+  ['paper', 'margin', 'gap'].forEach(id =>
     $(id).addEventListener('input', () => { redistributeCounts(); renderSheetPreview(); }));
+  $('photo-size').addEventListener('input', async () => {
+    redistributeCounts();
+    // aspect changed: refresh every photo's cropped preview
+    for (const p of photos) await refreshCardPreview(p);
+    renderSheetPreview();
+  });
   $('cut').addEventListener('change', renderSheetPreview);
 
-  // Format auto-default based on paper. Stops auto-defaulting once user picks
-  // an option themselves.
-  $('paper').addEventListener('change', () => {
-    if (!$('format').dataset.touched) autoFormat();
-    updateBtnLabel();
-  });
-  $('format').addEventListener('change', () => {
-    $('format').dataset.touched = '1';
-    updateBtnLabel();
-  });
-  autoFormat();
-  updateBtnLabel();
+  document.querySelectorAll('.download-row .btn').forEach(btn =>
+    btn.addEventListener('click', () => generateSheet(btn, btn.dataset.format)));
 
   setupDropzone();
   $('btn-add-more').addEventListener('click', () => $('file').click());
-  $('btn-sheet').addEventListener('click', generateSheet);
   $('btn-refresh').addEventListener('click', startFresh);
 }
 
-const PDF_FRIENDLY_PAPERS = new Set(['A4', 'A3', 'Letter']);
-function autoFormat() {
-  const paper = $('paper').value;
-  $('format').value = PDF_FRIENDLY_PAPERS.has(paper) ? 'pdf' : 'image';
-}
-function updateBtnLabel() {
-  const fmt = $('format').value;
+function updateDownloadHint() {
   const totalCopies = photos.reduce((s, p) => s + p.count, 0);
   const cap = capacity();
   const pages = totalCopies ? Math.ceil(totalCopies / cap) : 1;
-  let label;
-  if (fmt === 'pdf') {
-    label = pages > 1 ? `Generate & download PDF (${pages} pages)` : 'Generate & download PDF';
-  } else {
-    label = pages > 1 ? `Generate & download ZIP (${pages} images)` : 'Generate & download PNG';
-  }
-  $('btn-sheet').querySelector('.btn-label').textContent = label;
+  $('download-hint').textContent = pages > 1
+    ? `Will be ${pages} pages — PDF stays one file; PNG/JPG come as a ZIP.`
+    : 'Pick any format. Generate as many times as you want.';
 }
 
 function startFresh() {
@@ -152,6 +137,7 @@ async function addPhoto(file) {
     bgRemoved: false,
     bgColor: '#ffffff',
     count: 0,
+    crop: null,         // {x,y,w,h} normalized to source; null = auto
     el: null,
   };
   photo.el = buildCard(photo);
@@ -161,7 +147,7 @@ async function addPhoto(file) {
   $('step-sheet').hidden = false;
   $('photos-count').textContent = photos.length;
 
-  await drawToCanvas(normBlob, photo.el.querySelector('.thumb'));
+  await refreshCardPreview(photo);
   detectFace(photo);
 }
 
@@ -201,8 +187,7 @@ function buildCard(photo) {
       photo.bgRemoved = false;
       photo.cutoutBlob = null;
       photo.finalBlob = photo.origBlob;
-      photo.finalDataURL = await blobToDataURL(photo.origBlob);
-      await drawToCanvas(photo.finalBlob, node.querySelector('.thumb'));
+      await refreshCardPreview(photo);
       renderSheetPreview();
     }
   });
@@ -239,8 +224,235 @@ function buildCard(photo) {
     renderSheetPreview();
   });
 
+  // adjust crop
+  node.querySelector('.btn-adjust').addEventListener('click', () => openEditor(photo));
+
   return node;
 }
+
+/* ============== CROP EDITOR ============== */
+const editor = {
+  photo: null,
+  W: 0, H: 0,         // source native px
+  frameW: 0, frameH: 0,
+  baseFit: 1,          // scale that exactly covers frame at zoom=0
+  zoom: 0,             // 0..4
+  tx: 0, ty: 0,        // top-left of image inside frame
+};
+
+async function openEditor(photo) {
+  const photoKey = $('photo-size').value;
+  const tw = PHOTO[photoKey].w;
+  const th = PHOTO[photoKey].h;
+  const aspect = tw / th;
+
+  // load source image (the bg-applied finalBlob is the source we crop from)
+  const url = URL.createObjectURL(photo.finalBlob);
+  const img = await new Promise((res, rej) => {
+    const i = new Image();
+    i.onload = () => res(i); i.onerror = rej; i.src = url;
+  });
+  editor.photo = photo;
+  editor.W = img.naturalWidth;
+  editor.H = img.naturalHeight;
+
+  // frame size: aim for ~360px on the longest dim, keep target aspect
+  const maxDim = 360;
+  if (aspect >= 1) {
+    editor.frameW = maxDim;
+    editor.frameH = Math.round(maxDim / aspect);
+  } else {
+    editor.frameH = maxDim;
+    editor.frameW = Math.round(maxDim * aspect);
+  }
+  const frame = $('editor-frame');
+  frame.style.width = editor.frameW + 'px';
+  frame.style.height = editor.frameH + 'px';
+
+  const imgEl = $('editor-img');
+  imgEl.src = url;
+  imgEl.style.width = editor.W + 'px';
+  imgEl.style.height = editor.H + 'px';
+
+  // baseFit = cover. zoom range adds up to 4x on top.
+  editor.baseFit = Math.max(editor.frameW / editor.W, editor.frameH / editor.H);
+
+  // initialize from saved crop if any, else center on face/middle
+  if (photo.crop) {
+    const cw = photo.crop.w * editor.W;
+    const targetScale = editor.frameW / cw;
+    editor.zoom = Math.max(0, targetScale / editor.baseFit - 1);
+    const s = editor.baseFit * (1 + editor.zoom);
+    editor.tx = -photo.crop.x * editor.W * s;
+    editor.ty = -photo.crop.y * editor.H * s;
+  } else {
+    editor.zoom = 0;
+    const s = editor.baseFit;
+    editor.tx = (editor.frameW - editor.W * s) / 2;
+    editor.ty = (editor.frameH - editor.H * s) / 2;
+  }
+  clampOffsets();
+  syncEditor();
+
+  $('editor-zoom').value = Math.round(editor.zoom * 100);
+  $('editor-modal').hidden = false;
+}
+
+function clampOffsets() {
+  const s = editor.baseFit * (1 + editor.zoom);
+  const iw = editor.W * s;
+  const ih = editor.H * s;
+  // image must always cover frame
+  editor.tx = Math.min(0, Math.max(editor.frameW - iw, editor.tx));
+  editor.ty = Math.min(0, Math.max(editor.frameH - ih, editor.ty));
+}
+
+function syncEditor() {
+  const s = editor.baseFit * (1 + editor.zoom);
+  const imgEl = $('editor-img');
+  imgEl.style.transform = `translate(${editor.tx}px, ${editor.ty}px) scale(${s})`;
+}
+
+function currentCropRect() {
+  const s = editor.baseFit * (1 + editor.zoom);
+  const srcX = -editor.tx / s;
+  const srcY = -editor.ty / s;
+  const srcW = editor.frameW / s;
+  const srcH = editor.frameH / s;
+  return {
+    x: srcX / editor.W,
+    y: srcY / editor.H,
+    w: srcW / editor.W,
+    h: srcH / editor.H,
+  };
+}
+
+function setupEditorControls() {
+  const frame = $('editor-frame');
+  let dragging = false, lastX = 0, lastY = 0;
+
+  const onDown = (e) => {
+    dragging = true; frame.classList.add('dragging');
+    const p = e.touches ? e.touches[0] : e;
+    lastX = p.clientX; lastY = p.clientY;
+    e.preventDefault();
+  };
+  const onMove = (e) => {
+    if (!dragging) return;
+    const p = e.touches ? e.touches[0] : e;
+    editor.tx += p.clientX - lastX;
+    editor.ty += p.clientY - lastY;
+    lastX = p.clientX; lastY = p.clientY;
+    clampOffsets(); syncEditor();
+    e.preventDefault();
+  };
+  const onUp = () => { dragging = false; frame.classList.remove('dragging'); };
+
+  frame.addEventListener('mousedown', onDown);
+  window.addEventListener('mousemove', onMove);
+  window.addEventListener('mouseup', onUp);
+  frame.addEventListener('touchstart', onDown, { passive: false });
+  window.addEventListener('touchmove', onMove, { passive: false });
+  window.addEventListener('touchend', onUp);
+
+  frame.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const delta = -e.deltaY * 0.002;
+    setZoom(editor.zoom + delta);
+  }, { passive: false });
+
+  $('editor-zoom').addEventListener('input', e => setZoom(parseInt(e.target.value, 10) / 100));
+  $('editor-zoom-in').addEventListener('click', () => setZoom(editor.zoom + 0.2));
+  $('editor-zoom-out').addEventListener('click', () => setZoom(editor.zoom - 0.2));
+
+  $('editor-cancel').addEventListener('click', () => { $('editor-modal').hidden = true; });
+  $('editor-modal').querySelector('.modal-backdrop').addEventListener('click',
+    () => { $('editor-modal').hidden = true; });
+  $('editor-reset').addEventListener('click', async () => {
+    editor.photo.crop = null;
+    await refreshCardPreview(editor.photo);
+    renderSheetPreview();
+    $('editor-modal').hidden = true;
+  });
+  $('editor-done').addEventListener('click', async () => {
+    editor.photo.crop = currentCropRect();
+    await refreshCardPreview(editor.photo);
+    renderSheetPreview();
+    $('editor-modal').hidden = true;
+  });
+}
+
+function setZoom(z) {
+  editor.zoom = Math.max(0, Math.min(4, z));
+  $('editor-zoom').value = Math.round(editor.zoom * 100);
+  // keep frame center stable while zooming
+  const oldScale = editor.baseFit * (1 + editor.zoom);
+  // Recompute offsets so the same source point under the center stays under it.
+  // Simpler approach: clamp after change.
+  clampOffsets();
+  syncEditor();
+}
+
+// Renders the user's crop (or whole image) to the card thumb canvas, and
+// updates finalDataURL so the sheet preview reflects the manual crop.
+async function refreshCardPreview(photo) {
+  const url = URL.createObjectURL(photo.finalBlob);
+  const img = await new Promise((res, rej) => {
+    const i = new Image();
+    i.onload = () => res(i); i.onerror = rej; i.src = url;
+  });
+  const canvas = photo.el.querySelector('.thumb');
+  const pill = photo.el.querySelector('.crop-state-pill');
+  const cv = document.createElement('canvas');
+  const photoKey = $('photo-size').value;
+  const aspect = PHOTO[photoKey].w / PHOTO[photoKey].h;
+
+  let sx, sy, sw, sh;
+  if (photo.crop) {
+    sx = photo.crop.x * img.naturalWidth;
+    sy = photo.crop.y * img.naturalHeight;
+    sw = photo.crop.w * img.naturalWidth;
+    sh = photo.crop.h * img.naturalHeight;
+    pill.hidden = false;
+  } else {
+    // center-cover crop at target aspect for accurate preview
+    const srcAspect = img.naturalWidth / img.naturalHeight;
+    if (srcAspect > aspect) {
+      sh = img.naturalHeight;
+      sw = sh * aspect;
+      sx = (img.naturalWidth - sw) / 2;
+      sy = 0;
+    } else {
+      sw = img.naturalWidth;
+      sh = sw / aspect;
+      sx = 0;
+      sy = (img.naturalHeight - sh) / 2;
+    }
+    pill.hidden = true;
+  }
+
+  // render thumb
+  const maxDim = 200;
+  const outW = aspect >= 1 ? maxDim : Math.round(maxDim * aspect);
+  const outH = aspect >= 1 ? Math.round(maxDim / aspect) : maxDim;
+  cv.width = outW; cv.height = outH;
+  cv.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, outW, outH);
+  canvas.width = outW; canvas.height = outH;
+  canvas.getContext('2d').drawImage(cv, 0, 0);
+
+  // preview dataURL for SVG sheet preview (higher-res render)
+  const prevMax = 400;
+  const pW = aspect >= 1 ? prevMax : Math.round(prevMax * aspect);
+  const pH = aspect >= 1 ? Math.round(prevMax / aspect) : prevMax;
+  const pv = document.createElement('canvas');
+  pv.width = pW; pv.height = pH;
+  pv.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, pW, pH);
+  photo.finalDataURL = pv.toDataURL('image/jpeg', 0.9);
+
+  URL.revokeObjectURL(url);
+}
+
+setupEditorControls();
 
 function removePhoto(id) {
   const idx = photos.findIndex(p => p.id === id);
@@ -284,8 +496,7 @@ async function applyColor(photo, hex) {
   fd.append('color', hex);
   const r = await fetch('/api/apply-bg', { method: 'POST', body: fd });
   photo.finalBlob = await r.blob();
-  photo.finalDataURL = await blobToDataURL(photo.finalBlob);
-  await drawToCanvas(photo.finalBlob, photo.el.querySelector('.thumb'));
+  await refreshCardPreview(photo);
   renderSheetPreview();
 }
 
@@ -378,12 +589,11 @@ function renderSheetPreview() {
     `<b>${totalCopies}</b> total copies · grid <b>${cols}×${rows}</b> = ${cap}/page · ` +
     `paper ${pw.toFixed(0)}×${ph.toFixed(0)} mm · photo ${fw}×${fh} mm${pageNote}`;
 
-  updateBtnLabel();
+  updateDownloadHint();
 }
 
 /* ============== GENERATE ============== */
-async function generateSheet(e) {
-  const btn = e.currentTarget;
+async function generateSheet(btn, format) {
   if (!photos.length) {
     setStatus('sheet-status', 'Add at least one photo.', 'err'); return;
   }
@@ -392,12 +602,13 @@ async function generateSheet(e) {
     setStatus('sheet-status', 'Set copies > 0 on at least one photo.', 'err'); return;
   }
   busy(btn, true);
-  setStatus('sheet-status', 'Generating…');
+  setStatus('sheet-status', `Generating ${format.toUpperCase()}…`);
 
   try {
     const fd = new FormData();
     for (const p of photos) fd.append('images', p.finalBlob, `${p.id}.png`);
     fd.append('counts', JSON.stringify(photos.map(p => p.count)));
+    fd.append('crops', JSON.stringify(photos.map(p => p.crop || null)));
     fd.append('paper', $('paper').value);
     fd.append('photo_size', $('photo-size').value);
     fd.append('dpi', $('dpi').value);
@@ -405,7 +616,7 @@ async function generateSheet(e) {
     fd.append('gap', $('gap').value);
     fd.append('cut_lines', $('cut').checked ? '1' : '0');
     fd.append('smart_crop', $('smart').checked ? '1' : '0');
-    fd.append('format', $('format').value);
+    fd.append('format', format);
 
     const r = await fetch('/api/generate-sheet', { method: 'POST', body: fd });
     if (!r.ok) {
@@ -422,6 +633,7 @@ async function generateSheet(e) {
     else if (blob.type === 'application/pdf') filename += '.pdf';
     else if (blob.type === 'application/zip') filename += '.zip';
     else if (blob.type === 'image/png') filename += '.png';
+    else if (blob.type === 'image/jpeg') filename += '.jpg';
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url; a.download = filename; a.click();

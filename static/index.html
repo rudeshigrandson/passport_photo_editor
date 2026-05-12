@@ -79,20 +79,24 @@
         <label class="check"><input type="checkbox" id="cut" checked /> show cut lines</label>
         <label class="check"><input type="checkbox" id="smart" checked /> smart face-anchored crop (recommended)</label>
 
-        <div class="field">
-          <label for="format">Output format</label>
-          <select id="format">
-            <option value="pdf">PDF (best for A4 / A3 / Letter)</option>
-            <option value="image">Image — PNG (best for 4×6, 5×7, 4×5 photo paper)</option>
-          </select>
-        </div>
-
         <div id="layout-info" class="layout-info"></div>
 
-        <button class="btn primary big" id="btn-sheet">
-          <span class="btn-label">Generate &amp; download</span>
-          <span class="spinner" hidden></span>
-        </button>
+        <p class="section-label">Download as</p>
+        <div class="download-row">
+          <button class="btn primary" data-format="pdf">
+            <span class="btn-label">PDF</span>
+            <span class="spinner" hidden></span>
+          </button>
+          <button class="btn primary" data-format="png">
+            <span class="btn-label">PNG</span>
+            <span class="spinner" hidden></span>
+          </button>
+          <button class="btn primary" data-format="jpg">
+            <span class="btn-label">JPG</span>
+            <span class="spinner" hidden></span>
+          </button>
+        </div>
+        <p class="hint" id="download-hint"></p>
         <div id="sheet-status" class="status"></div>
       </div>
 
@@ -128,9 +132,36 @@
         <span>Copies on sheet</span>
         <input type="number" class="count" value="10" min="0" max="100" />
       </label>
+      <button class="btn ghost mini btn-adjust" type="button">✎ Adjust crop</button>
+      <span class="crop-state-pill" hidden>custom crop</span>
     </div>
   </div>
 </template>
+
+<!-- Crop editor modal -->
+<div id="editor-modal" class="modal" hidden>
+  <div class="modal-backdrop"></div>
+  <div class="modal-card">
+    <h3>Adjust crop</h3>
+    <p class="hint">Drag the photo to reposition. Scroll or use the slider to zoom. The frame shows exactly what will print.</p>
+    <div class="editor-stage">
+      <div id="editor-frame" class="editor-frame">
+        <img id="editor-img" alt="" draggable="false" />
+        <div class="editor-grid"></div>
+      </div>
+    </div>
+    <div class="editor-controls">
+      <button id="editor-zoom-out" class="btn ghost mini" type="button">−</button>
+      <input type="range" id="editor-zoom" min="0" max="400" value="0" />
+      <button id="editor-zoom-in" class="btn ghost mini" type="button">+</button>
+      <button id="editor-reset" class="btn ghost mini" type="button">Reset to auto</button>
+    </div>
+    <div class="modal-actions">
+      <button id="editor-cancel" class="btn ghost" type="button">Cancel</button>
+      <button id="editor-done" class="btn primary" type="button">Apply</button>
+    </div>
+  </div>
+</div>
 
 <script src="app.js"></script>
 </body>
